@@ -49,7 +49,7 @@ func inferFilenameFromURL(raw string) (string, error) {
 	if (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host == "" {
 		return "", fmt.Errorf("URL must include a host: %s", raw)
 	}
-	name := path.Base(parsed.Path)
+	name := path.Base(parsed.EscapedPath())
 	if name == "." || name == "/" || name == "" {
 		return "", fmt.Errorf("URL does not contain a file name: %s", raw)
 	}
@@ -68,8 +68,8 @@ func inferNeoForgeVersionFromURL(raw string) (string, error) {
 		return "", fmt.Errorf("NeoForge URL must include a host: %s", raw)
 	}
 
-	installerName := path.Base(parsed.Path)
-	versionDir := path.Base(path.Dir(parsed.Path))
+	installerName := path.Base(parsed.EscapedPath())
+	versionDir := path.Base(path.Dir(parsed.EscapedPath()))
 	expected := fmt.Sprintf("neoforge-%s-installer.jar", versionDir)
 	if installerName != expected {
 		return "", fmt.Errorf("could not infer NeoForge version from URL: %s", raw)

@@ -23,20 +23,24 @@ func ReconcileMods(targetDir string, mods []ManifestMod, force bool, workerCount
 		return fmt.Errorf("manifest does not contain any server mod jars")
 	}
 
+	specs := make([]ModSpec, 0, len(mods))
+	for _, mod := range mods {
+		filename, err := inferFilenameFromURL(mod.URL)
+		if err != nil {
+			return fmt.Errorf("%w for %s", err, mod.URL)
+		}
+		if !isSafeModFilename(filename) {
+			return fmt.Errorf("unsafe or non-jar mod filename in manifest: %s", filename)
+		}
+		if err := validateURLScheme(mod.URL, "manifest mod url", "http", "https", "file"); err != nil {
+			return fmt.Errorf("%s for %s", err, filename)
+		}
+		specs = append(specs, ModSpec{FileName: filename, URL: mod.URL})
+	}
+
 	modsPath := modsDir(targetDir)
 	if err := os.MkdirAll(modsPath, 0o755); err != nil {
 		return err
-	}
-
-	specs := make([]ModSpec, 0, len(mods))
-	for _, mod := range mods {
-		if !isSafeModFilename(mod.Filename) {
-			return fmt.Errorf("unsafe or non-jar mod filename in manifest: %s", mod.Filename)
-		}
-		if err := validateURLScheme(mod.URL, "manifest mod url", "http", "https", "file"); err != nil {
-			return fmt.Errorf("%s for %s", err, mod.Filename)
-		}
-		specs = append(specs, ModSpec{FileName: mod.Filename, URL: mod.URL})
 	}
 
 	sort.Slice(specs, func(i, j int) bool {

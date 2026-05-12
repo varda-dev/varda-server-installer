@@ -9,44 +9,39 @@ import (
 )
 
 var javaCommand = exec.Command
+var downloadFile = downloadToFile
 
 func InstallOrUpdateNeoForge(targetDir string, desired NeoForgeManifest, force bool) (string, error) {
-	if desired.Version == "" {
-		return "", fmt.Errorf("manifest neoforge.version must be non-empty")
-	}
 	if desired.InstallerURL == "" {
 		return "", fmt.Errorf("manifest neoforge.installer_url must be non-empty")
 	}
 
-	actualVersion, err := inferNeoForgeVersionFromURL(desired.InstallerURL)
+	desiredVersion, err := inferNeoForgeVersionFromURL(desired.InstallerURL)
 	if err != nil {
 		return "", err
 	}
-	if actualVersion != desired.Version {
-		return "", fmt.Errorf("manifest neoforge.version %q does not match installer URL version %q", desired.Version, actualVersion)
-	}
 
-	desiredDir := installedNeoForgeVersionDir(targetDir, desired.Version)
+	desiredDir := installedNeoForgeVersionDir(targetDir, desiredVersion)
 	installed, err := installedNeoForgeVersions(targetDir)
 	if err != nil {
 		return "", err
 	}
 
 	if dirExists(desiredDir) && !force {
-		fmt.Printf("NeoForge %s already installed; skipping install.\n", desired.Version)
-		if err := cleanupOldNeoForgeVersions(targetDir, desired.Version); err != nil {
+		fmt.Printf("NeoForge %s already installed; skipping install.\n", desiredVersion)
+		if err := cleanupOldNeoForgeVersions(targetDir, desiredVersion); err != nil {
 			return "", err
 		}
-		return desired.Version, nil
+		return desiredVersion, nil
 	}
 
 	switch {
 	case len(installed) == 0:
-		fmt.Printf("Installing NeoForge %s...\n", desired.Version)
+		fmt.Printf("Installing NeoForge %s...\n", desiredVersion)
 	case force:
-		fmt.Printf("Reinstalling NeoForge %s due to --force...\n", desired.Version)
+		fmt.Printf("Reinstalling NeoForge %s due to --force...\n", desiredVersion)
 	default:
-		fmt.Printf("Updating NeoForge to %s...\n", desired.Version)
+		fmt.Printf("Updating NeoForge to %s...\n", desiredVersion)
 	}
 
 	tempDir, err := os.MkdirTemp("", "varda-neoforge-")
@@ -60,7 +55,7 @@ func InstallOrUpdateNeoForge(targetDir string, desired NeoForgeManifest, force b
 		return "", err
 	}
 	installerPath := filepath.Join(tempDir, installerName)
-	if err := downloadToFile(desired.InstallerURL, installerPath, force, "NeoForge installer"); err != nil {
+	if err := downloadFile(desired.InstallerURL, installerPath, force, "NeoForge installer"); err != nil {
 		return "", err
 	}
 
@@ -72,14 +67,14 @@ func InstallOrUpdateNeoForge(targetDir string, desired NeoForgeManifest, force b
 	}
 
 	if !dirExists(desiredDir) {
-		return "", fmt.Errorf("NeoForge install completed but expected version directory is missing: %s", desired.Version)
+		return "", fmt.Errorf("NeoForge install completed but expected version directory is missing: %s", desiredVersion)
 	}
 
-	if err := cleanupOldNeoForgeVersions(targetDir, desired.Version); err != nil {
+	if err := cleanupOldNeoForgeVersions(targetDir, desiredVersion); err != nil {
 		return "", err
 	}
 
-	return desired.Version, nil
+	return desiredVersion, nil
 }
 
 func cleanupNeoForgeInstallerArtifacts(targetDir string) error {

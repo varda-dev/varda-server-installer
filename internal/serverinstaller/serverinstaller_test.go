@@ -2,8 +2,6 @@ package serverinstaller
 
 import (
 	"archive/zip"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,6 +70,93 @@ func TestInferNeoForgeVersionFromURL(t *testing.T) {
 	}
 }
 
+func TestInferFilenameFromURL(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "https",
+			raw:  "https://example.invalid/mods/example.jar",
+			want: "example.jar",
+		},
+		{
+			name: "file",
+			raw:  "file:///tmp/Ars%20Fauna-1.4.1.jar",
+			want: "Ars Fauna-1.4.1.jar",
+		},
+		{
+			name: "spaces",
+			raw:  "https://example.invalid/mods/Example%20Mod-1.0.0.jar",
+			want: "Example Mod-1.0.0.jar",
+		},
+		{
+			name: "plus",
+			raw:  "https://edge.forgecdn.net/files/7515/858/comforts-neoforge-9.0.5%2b1.21.1.jar",
+			want: "comforts-neoforge-9.0.5+1.21.1.jar",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := inferFilenameFromURL(tc.raw)
+			if err != nil {
+				t.Fatalf("inferFilenameFromURL() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("inferFilenameFromURL() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestInferFilenameFromURLRejectsUnsafeDecodedNames(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "traversal",
+			raw:  "https://example.invalid/mods/%2e%2e%2fevil.jar",
+		},
+		{
+			name: "slash",
+			raw:  "https://example.invalid/mods/%2fevil.jar",
+		},
+		{
+			name: "backslash",
+			raw:  "https://example.invalid/mods/%5cevil.jar",
+		},
+		{
+			name: "non-jar",
+			raw:  "https://example.invalid/mods/example.zip",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := inferFilenameFromURL(tc.raw)
+			if err != nil {
+				t.Fatalf("inferFilenameFromURL() error = %v", err)
+			}
+			if isSafeModFilename(got) {
+				t.Fatalf("isSafeModFilename(%q) = true, want false", got)
+			}
+		})
+	}
+}
+
 func TestLoadManifestFromBytes(t *testing.T) {
 	t.Parallel()
 
@@ -81,7 +166,6 @@ func TestLoadManifestFromBytes(t *testing.T) {
   "version": "0.1.4",
   "minecraft": "1.21.1",
   "neoforge": {
-    "version": "21.1.228",
     "installer_url": "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"
   },
   "server_config": {
@@ -90,7 +174,6 @@ func TestLoadManifestFromBytes(t *testing.T) {
   },
   "mods": [
     {
-      "filename": "example.jar",
       "url": "https://example.invalid/example.jar"
     }
   ]
@@ -100,22 +183,24 @@ func TestLoadManifestFromBytes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadManifestFromBytes() error = %v", err)
 	}
-	if manifest.Pack != "varda" || manifest.Version != "0.1.4" || manifest.NeoForge.Version != "21.1.228" {
+	if manifest.Pack != "varda" || manifest.Version != "0.1.4" || manifest.NeoForge.InstallerURL == "" {
 		t.Fatalf("LoadManifestFromBytes() = %#v", manifest)
+	}
+	if len(manifest.Mods) != 1 || manifest.Mods[0].URL != "https://example.invalid/example.jar" {
+		t.Fatalf("LoadManifestFromBytes() mods = %#v", manifest.Mods)
 	}
 	if got := manifest.packVersionString(); got != "0.1.4" {
 		t.Fatalf("packVersionString() = %q, want %q", got, "0.1.4")
 	}
 }
 
-func TestManifestValidateRejectsNeoForgeVersionMismatch(t *testing.T) {
+func TestManifestValidateAcceptsSimplifiedManifest(t *testing.T) {
 	t.Parallel()
 
 	manifest := validTestManifest()
-	manifest.NeoForge.Version = "21.1.227"
 
-	if err := manifest.Validate(); err == nil || !strings.Contains(strings.ToLower(err.Error()), "does not match") {
-		t.Fatalf("Validate() error = %v, want NeoForge version mismatch", err)
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
 	}
 }
 
@@ -149,7 +234,6 @@ func TestManifestValidateRejectsWrongPack(t *testing.T) {
 		Pack:          "other",
 		Version:       "1.0.0",
 		NeoForge: NeoForgeManifest{
-			Version:      "21.1.1",
 			InstallerURL: "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.1/neoforge-21.1.1-installer.jar",
 		},
 	}
@@ -163,7 +247,7 @@ func TestManifestValidateRejectsUnsafeModFilename(t *testing.T) {
 	t.Parallel()
 
 	manifest := validTestManifest()
-	manifest.Mods = []ManifestMod{{Filename: "../evil.jar", URL: "https://example.invalid/evil.jar"}}
+	manifest.Mods = []ManifestMod{{URL: "https://example.invalid/evil%5c.jar"}}
 
 	if err := manifest.Validate(); err == nil || !strings.Contains(strings.ToLower(err.Error()), "unsafe") {
 		t.Fatalf("Validate() error = %v, want unsafe filename rejection", err)
@@ -174,10 +258,21 @@ func TestManifestValidateRejectsNonJarModFilename(t *testing.T) {
 	t.Parallel()
 
 	manifest := validTestManifest()
-	manifest.Mods = []ManifestMod{{Filename: "example.zip", URL: "https://example.invalid/example.zip"}}
+	manifest.Mods = []ManifestMod{{URL: "https://example.invalid/example.zip"}}
 
 	if err := manifest.Validate(); err == nil || !strings.Contains(strings.ToLower(err.Error()), "non-jar") {
 		t.Fatalf("Validate() error = %v, want non-jar rejection", err)
+	}
+}
+
+func TestManifestValidateRejectsMalformedModURL(t *testing.T) {
+	t.Parallel()
+
+	manifest := validTestManifest()
+	manifest.Mods = []ManifestMod{{URL: "https://"}}
+
+	if err := manifest.Validate(); err == nil || !strings.Contains(strings.ToLower(err.Error()), "host") {
+		t.Fatalf("Validate() error = %v, want malformed URL rejection", err)
 	}
 }
 
@@ -214,7 +309,7 @@ func TestWriteInstallDiagnosticsWritesOnlyDiagnostics(t *testing.T) {
 func TestCheckDoesNotRequireTargetDirOrCreateIt(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "missing-target")
 	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
-	raw := []byte(`{"schema_version":1,"pack":"varda","version":"0.1.4","minecraft":"1.21.1","neoforge":{"version":"21.1.228","installer_url":"https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"},"mods":[{"filename":"example.jar","url":"https://example.invalid/example.jar"}]}`)
+	raw := []byte(`{"schema_version":1,"pack":"varda","version":"0.1.4","minecraft":"1.21.1","neoforge":{"installer_url":"https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"},"mods":[{"url":"https://example.invalid/example.jar"}]}`)
 	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -225,6 +320,19 @@ func TestCheckDoesNotRequireTargetDirOrCreateIt(t *testing.T) {
 
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		t.Fatalf("check mode created target dir: %v", err)
+	}
+}
+
+func TestCheckAcceptsSimplifiedManifest(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing-target")
+	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
+	raw := []byte(`{"schema_version":1,"pack":"varda","version":"0.1.4","minecraft":"1.21.1","neoforge":{"installer_url":"https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"},"mods":[{"url":"https://example.invalid/example.jar"}]}`)
+	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Run([]string{"--dir", root, "--manifest-url", fileURL(manifestPath), "--check"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
 	}
 }
 
@@ -282,7 +390,7 @@ func TestReconcileModsRemovesUnmanagedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ReconcileMods(root, []ManifestMod{{Filename: "source.jar", URL: fileURL(source)}}, false, 6); err != nil {
+	if err := ReconcileMods(root, []ManifestMod{{URL: fileURL(source)}}, false, 6); err != nil {
 		t.Fatalf("ReconcileMods() error = %v", err)
 	}
 
@@ -305,32 +413,67 @@ func TestReconcileModsRemovesUnmanagedFiles(t *testing.T) {
 	}
 }
 
+func TestReconcileModsUsesDecodedFilename(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	source := filepath.Join(root, "Example Mod+[1]'s.jar")
+	if err := os.WriteFile(source, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	modURL := "file://" + filepath.ToSlash(root) + "/Example%20Mod%2b%5b1%5d%27s.jar"
+	if err := ReconcileMods(root, []ManifestMod{{URL: modURL}}, false, 2); err != nil {
+		t.Fatalf("ReconcileMods() error = %v", err)
+	}
+
+	want := filepath.Join(root, "mods", "Example Mod+[1]'s.jar")
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("decoded mod filename missing: %v", err)
+	}
+}
+
+func TestReconcileModsRejectsUnsafeInferredFilenameBeforeWrite(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	err := ReconcileMods(root, []ManifestMod{{URL: "https://example.invalid/mods/%2e%2e%2fevil.jar"}}, false, 2)
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "unsafe") {
+		t.Fatalf("ReconcileMods() error = %v, want unsafe filename rejection", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "mods")); !os.IsNotExist(err) {
+		t.Fatalf("ReconcileMods() created mods dir for unsafe manifest: %v", err)
+	}
+}
+
 func TestInstallOrUpdateNeoForgeUsesDesiredManifest(t *testing.T) {
 	root := t.TempDir()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("fake installer"))
-	}))
-	defer server.Close()
-
+	desiredVersion := "21.1.228"
 	desired := NeoForgeManifest{
-		Version:      "21.1.228",
-		InstallerURL: server.URL + "/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar",
+		InstallerURL: "https://example.invalid/releases/net/neoforged/neoforge/" + desiredVersion + "/neoforge-" + desiredVersion + "-installer.jar",
 	}
 
 	oldJavaCommand := javaCommand
+	oldDownloadFile := downloadFile
 	javaCommand = func(name string, args ...string) *exec.Cmd {
-		cmd := exec.Command(os.Args[0], "-test.run=TestHelperJavaInstallerProcess", "--", filepath.Join(root, "libraries", "net", "neoforged", "neoforge", desired.Version))
+		cmd := exec.Command(os.Args[0], "-test.run=TestHelperJavaInstallerProcess", "--", filepath.Join(root, "libraries", "net", "neoforged", "neoforge", desiredVersion))
 		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
 		return cmd
 	}
-	defer func() { javaCommand = oldJavaCommand }()
+	downloadFile = func(rawURL, targetPath string, force bool, label string) error {
+		return os.WriteFile(targetPath, []byte("fake installer"), 0o644)
+	}
+	defer func() {
+		javaCommand = oldJavaCommand
+		downloadFile = oldDownloadFile
+	}()
 
 	got, err := InstallOrUpdateNeoForge(root, desired, false)
 	if err != nil {
 		t.Fatalf("InstallOrUpdateNeoForge() error = %v", err)
 	}
-	if got != desired.Version {
-		t.Fatalf("InstallOrUpdateNeoForge() = %q, want %q", got, desired.Version)
+	if got != desiredVersion {
+		t.Fatalf("InstallOrUpdateNeoForge() = %q, want %q", got, desiredVersion)
 	}
 }
 
@@ -573,13 +716,11 @@ func validTestManifest() Manifest {
 		Version:       "0.1.4",
 		Minecraft:     "1.21.1",
 		NeoForge: NeoForgeManifest{
-			Version:      "21.1.228",
 			InstallerURL: "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar",
 		},
 		Mods: []ManifestMod{
 			{
-				Filename: "example.jar",
-				URL:      "https://example.invalid/example.jar",
+				URL: "https://example.invalid/example.jar",
 			},
 		},
 	}

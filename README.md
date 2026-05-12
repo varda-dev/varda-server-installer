@@ -8,6 +8,12 @@ It fetches desired server state from:
 https://varda-dev.github.io/varda-modpack/manifest.json
 ```
 
+## Environment Setup
+Create a .env file in the repo's root with  
+```text
+GITHUB_PAT_RELEASES="xxx"
+```
+
 ## Requirements
 
 - Java 21+

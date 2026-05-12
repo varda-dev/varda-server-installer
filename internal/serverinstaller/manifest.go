@@ -25,7 +25,6 @@ type Manifest struct {
 }
 
 type NeoForgeManifest struct {
-	Version      string `json:"version"`
 	InstallerURL string `json:"installer_url"`
 }
 
@@ -35,8 +34,7 @@ type ServerConfigManifest struct {
 }
 
 type ManifestMod struct {
-	Filename string `json:"filename"`
-	URL      string `json:"url"`
+	URL string `json:"url"`
 }
 
 func LoadManifestFromBytes(data []byte) (Manifest, error) {
@@ -53,14 +51,12 @@ func (m *Manifest) normalize() {
 	m.Pack = strings.TrimSpace(m.Pack)
 	m.Version = strings.TrimSpace(m.Version)
 	m.Minecraft = strings.TrimSpace(m.Minecraft)
-	m.NeoForge.Version = strings.TrimSpace(m.NeoForge.Version)
 	m.NeoForge.InstallerURL = strings.TrimSpace(m.NeoForge.InstallerURL)
 	if m.ServerConfig != nil {
 		m.ServerConfig.URL = strings.TrimSpace(m.ServerConfig.URL)
 		m.ServerConfig.SHA256 = strings.TrimSpace(m.ServerConfig.SHA256)
 	}
 	for i := range m.Mods {
-		m.Mods[i].Filename = strings.TrimSpace(m.Mods[i].Filename)
 		m.Mods[i].URL = strings.TrimSpace(m.Mods[i].URL)
 	}
 }
@@ -77,18 +73,11 @@ func (m Manifest) Validate() error {
 	if m.Version == "" {
 		return fmt.Errorf("manifest version must be non-empty")
 	}
-	if m.NeoForge.Version == "" {
-		return fmt.Errorf("manifest neoforge.version must be non-empty")
-	}
 	if err := validateURLScheme(m.NeoForge.InstallerURL, "manifest neoforge.installer_url", "http", "https"); err != nil {
 		return err
 	}
-	actualVersion, err := inferNeoForgeVersionFromURL(m.NeoForge.InstallerURL)
-	if err != nil {
+	if _, err := inferNeoForgeVersionFromURL(m.NeoForge.InstallerURL); err != nil {
 		return err
-	}
-	if actualVersion != m.NeoForge.Version {
-		return fmt.Errorf("manifest neoforge.version %q does not match installer URL version %q", m.NeoForge.Version, actualVersion)
 	}
 
 	if m.ServerConfig != nil && m.ServerConfig.URL != "" {
@@ -106,11 +95,15 @@ func (m Manifest) Validate() error {
 	}
 
 	for _, mod := range m.Mods {
-		if !isSafeModFilename(mod.Filename) {
-			return fmt.Errorf("unsafe or non-jar mod filename in manifest: %s", mod.Filename)
+		filename, err := inferFilenameFromURL(mod.URL)
+		if err != nil {
+			return fmt.Errorf("%w for %s", err, mod.URL)
+		}
+		if !isSafeModFilename(filename) {
+			return fmt.Errorf("unsafe or non-jar mod filename in manifest: %s", filename)
 		}
 		if err := validateURLScheme(mod.URL, "manifest mod url", "http", "https", "file"); err != nil {
-			return fmt.Errorf("%s for %s", err, mod.Filename)
+			return fmt.Errorf("%s for %s", err, filename)
 		}
 	}
 
