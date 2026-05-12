@@ -1,0 +1,23 @@
+{
+  "editor.detectIndentation": false,
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+  "files.trimTrailingWhitespace": true,
+  "[go]": {
+    "editor.insertSpaces": false,
+    "editor.tabSize": 2,
+    "files.eol": "\n"
+  },
+  "[python]": {
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2,
+    "files.eol": "\n"
+  },
+  "[markdown]": {
+    "files.eol": "\n",
+    "files.trimTrailingWhitespace": false
+  },
+  "[json]": {
+    "files.eol": "\n"
+  }
+}
