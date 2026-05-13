@@ -2,6 +2,7 @@ package serverinstaller
 
 import (
 	"archive/zip"
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -306,7 +307,7 @@ func TestWriteInstallDiagnosticsWritesOnlyDiagnostics(t *testing.T) {
 	}
 }
 
-func TestCheckDoesNotRequireTargetDirOrCreateIt(t *testing.T) {
+func TestCheckManifestDoesNotRequireTargetDirOrCreateIt(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "missing-target")
 	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
 	raw := []byte(`{"schema_version":1,"pack":"varda","version":"0.1.4","minecraft":"1.21.1","neoforge":{"installer_url":"https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"},"mods":[{"url":"https://example.invalid/example.jar"}]}`)
@@ -314,7 +315,7 @@ func TestCheckDoesNotRequireTargetDirOrCreateIt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Run([]string{"--dir", root, "--manifest-url", fileURL(manifestPath), "--check"}); err != nil {
+	if err := Run([]string{"--dir", root, "--manifest-url", fileURL(manifestPath), "--check-manifest"}); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 
@@ -333,6 +334,48 @@ func TestCheckAcceptsSimplifiedManifest(t *testing.T) {
 
 	if err := Run([]string{"--dir", root, "--manifest-url", fileURL(manifestPath), "--check"}); err != nil {
 		t.Fatalf("Run() error = %v", err)
+	}
+}
+
+func TestParseOptionsSupportsAliases(t *testing.T) {
+	t.Parallel()
+
+	opts, err := parseOptions([]string{"-d", "srv", "-f", "-v", "--check-manifest", "--manifest-url", "https://example.invalid/manifest.json", "--download-workers", "3"})
+	if err != nil {
+		t.Fatalf("parseOptions() error = %v", err)
+	}
+	if opts.TargetDir != "srv" {
+		t.Fatalf("parseOptions() TargetDir = %q, want %q", opts.TargetDir, "srv")
+	}
+	if !opts.Force {
+		t.Fatalf("parseOptions() Force = false, want true")
+	}
+	if !opts.VersionOnly {
+		t.Fatalf("parseOptions() VersionOnly = false, want true")
+	}
+	if !opts.CheckManifest {
+		t.Fatalf("parseOptions() CheckManifest = false, want true")
+	}
+	if opts.ManifestURL != "https://example.invalid/manifest.json" {
+		t.Fatalf("parseOptions() ManifestURL = %q, want %q", opts.ManifestURL, "https://example.invalid/manifest.json")
+	}
+	if opts.DownloadWorkers != 3 {
+		t.Fatalf("parseOptions() DownloadWorkers = %d, want 3", opts.DownloadWorkers)
+	}
+}
+
+func TestInstallerUsageText(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	printInstallerUsage(&buf)
+	got := buf.String()
+	want := "Usage: varda-server-installer [options]\n\nInstall or update a Varda Minecraft server from the remote manifest.\n\nOptions:\n  -h, --help                 Show this help text and exit\n  -v, --version              Print installer version and exit\n      --check-manifest       Validate remote manifest and print summary without changing files\n  -d, --dir DIR              Server install directory (default: .)\n  -f, --force                Re-download/reinstall files instead of keeping existing files\n      --manifest-url URL     Remote manifest URL\n      --download-workers N   Concurrent mod download workers (default: 6, range: 1-16)\n\nDefault manifest URL:\n  https://varda-dev.github.io/varda-modpack/manifest.json\n"
+	if got != want {
+		t.Fatalf("usage text mismatch:\n--- got ---\n%s--- want ---\n%s", got, want)
+	}
+	if strings.Contains(got, "--check\n") {
+		t.Fatalf("usage text unexpectedly mentions hidden --check alias\n%s", got)
 	}
 }
 
