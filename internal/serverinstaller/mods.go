@@ -168,21 +168,36 @@ func modLabel(mod ModSpec) string {
 }
 
 func modSpecFromManifestMod(mod ManifestMod) (ModSpec, error) {
-	label := mod.Name
-	filename, err := inferFilenameFromURL(mod.URL)
-	if err != nil {
+	label := strings.TrimSpace(mod.Name)
+	if label == "" {
+		label = strings.TrimSpace(mod.URL)
 		if label == "" {
-			label = mod.URL
+			label = "manifest mod"
 		}
+	}
+	if strings.TrimSpace(mod.Name) == "" {
+		return ModSpec{}, fmt.Errorf("%s: manifest mod name must be non-empty", label)
+	}
+	if strings.TrimSpace(mod.WebsiteURL) == "" {
+		return ModSpec{}, fmt.Errorf("%s: manifest mod website_url must be non-empty", label)
+	}
+	if mod.Size <= 0 {
+		return ModSpec{}, fmt.Errorf("%s: manifest mod size must be positive when present", label)
+	}
+	if err := validateURLScheme(mod.URL, "manifest mod url", "http", "https"); err != nil {
 		return ModSpec{}, fmt.Errorf("%s: %w", label, err)
 	}
-	if label == "" {
-		label = filename
+	filename, err := inferFilenameFromURL(mod.URL)
+	if err != nil {
+		return ModSpec{}, fmt.Errorf("%s: %w", label, err)
 	}
 	if !isSafeModFilename(filename) {
 		return ModSpec{}, fmt.Errorf("%s: unsafe or non-jar mod filename in manifest: %s", label, filename)
 	}
-	if err := validateURLScheme(mod.URL, "manifest mod url", "http", "https", "file"); err != nil {
+	if !strings.HasSuffix(strings.ToLower(filename), ".jar") {
+		return ModSpec{}, fmt.Errorf("%s: manifest mod url must end with .jar: %s", label, filename)
+	}
+	if err := validateURLScheme(mod.WebsiteURL, "manifest mod website_url", "http", "https"); err != nil {
 		return ModSpec{}, fmt.Errorf("%s: %w", label, err)
 	}
 	if mod.SHA1 == "" {
@@ -190,9 +205,6 @@ func modSpecFromManifestMod(mod ManifestMod) (ModSpec, error) {
 	}
 	if err := validateSHA1Hex(mod.SHA1, fmt.Sprintf("manifest mod sha1 for %s", label)); err != nil {
 		return ModSpec{}, err
-	}
-	if mod.Size < 0 {
-		return ModSpec{}, fmt.Errorf("%s: manifest mod size must be positive when present", label)
 	}
 	return ModSpec{Name: mod.Name, FileName: filename, URL: mod.URL, SHA1: mod.SHA1, Size: mod.Size}, nil
 }

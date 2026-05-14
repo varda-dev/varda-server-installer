@@ -8,6 +8,12 @@ It fetches desired server state from:
 https://varda-dev.github.io/varda-modpack/manifest.json
 ```
 
+Manifest contract comes from:
+
+```text
+https://varda-dev.github.io/varda-manifest/manifest.schema.json
+```
+
 ## Environment Setup
 Create a .env file in the repo's root with  
 ```text
@@ -74,11 +80,20 @@ start_pre() {
 ## Release Flow
 
 ```bash
+go generate ./...
 go test ./...
 go tool build-release -v 0.1.4 -c
 python gh-upload.py -v 0.1.4 -c "Varda server installer 0.1.4" --dry-run
 python gh-upload.py -v 0.1.4 -c "Varda server installer 0.1.4"
 ```
+
+After `go generate ./...`, use:
+
+```bash
+git diff --exit-code
+```
+
+Schema updates from `varda-manifest` flow into this repo via `go generate ./...`.
 
 Fallback, if `go tool` unavailable:
 

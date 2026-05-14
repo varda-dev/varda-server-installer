@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	manifestcontract "github.com/varda-dev/varda-server-installer/internal/manifest"
 )
 
 const (
-	defaultManifestURL             = "https://varda-dev.github.io/varda-modpack/manifest.json"
-	supportedManifestSchemaVersion = 2
+	defaultManifestURL = "https://varda-dev.github.io/varda-modpack/manifest.json"
 )
 
 type Manifest struct {
@@ -72,36 +73,48 @@ func (m *Manifest) normalize() {
 }
 
 func (m Manifest) Validate() error {
-	if m.SchemaVersion != supportedManifestSchemaVersion {
-		return fmt.Errorf("unsupported manifest schema version: %d", m.SchemaVersion)
+	if m.SchemaVersion != manifestcontract.SupportedSchemaVersion {
+		return fmt.Errorf("unsupported manifest schema_version %d", m.SchemaVersion)
 	}
-	if m.Pack != "varda" {
-		return fmt.Errorf("manifest pack must be varda")
+	if m.Pack != manifestcontract.ExpectedPack {
+		return fmt.Errorf("unsupported pack %q", m.Pack)
 	}
 	if m.Version == "" {
 		return fmt.Errorf("manifest version must be non-empty")
 	}
+	if m.Minecraft == "" {
+		return fmt.Errorf("manifest minecraft must be non-empty")
+	}
 	if m.NeoForge.Version == "" {
 		return fmt.Errorf("manifest neoforge.version must be non-empty")
 	}
-	if err := validateURLScheme(m.NeoForge.InstallerURL, "manifest neoforge.installer_url", "http", "https"); err != nil {
+	if err := validateRequiredArtifactURL(m.NeoForge.InstallerURL, "manifest neoforge.installer_url", ".jar"); err != nil {
 		return err
 	}
-	if m.NeoForge.SHA1 != "" {
-		if err := validateSHA1Hex(m.NeoForge.SHA1, "manifest neoforge.sha1"); err != nil {
-			return err
-		}
+	if m.NeoForge.SHA1 == "" {
+		return fmt.Errorf("manifest neoforge.sha1 must be non-empty")
+	}
+	if err := validateSHA1Hex(m.NeoForge.SHA1, "manifest neoforge.sha1"); err != nil {
+		return err
 	}
 
-	if m.ServerConfig != nil && m.ServerConfig.URL != "" {
-		if err := validateURLScheme(m.ServerConfig.URL, "manifest server_config.url", "http", "https", "file"); err != nil {
-			return err
-		}
+	if m.ServerConfig == nil {
+		return fmt.Errorf("manifest server_config must be non-empty")
 	}
-	if m.ServerConfig != nil && m.ServerConfig.SHA1 != "" {
-		if err := validateSHA1Hex(m.ServerConfig.SHA1, "manifest server_config.sha1"); err != nil {
-			return err
-		}
+	if m.ServerConfig.URL == "" {
+		return fmt.Errorf("manifest server_config.url must be non-empty")
+	}
+	if err := validateRequiredArtifactURL(m.ServerConfig.URL, "manifest server_config.url", ".zip"); err != nil {
+		return err
+	}
+	if m.ServerConfig.SHA1 == "" {
+		return fmt.Errorf("manifest server_config.sha1 must be non-empty")
+	}
+	if err := validateSHA1Hex(m.ServerConfig.SHA1, "manifest server_config.sha1"); err != nil {
+		return err
+	}
+	if len(m.Mods) == 0 {
+		return fmt.Errorf("manifest mods must be non-empty")
 	}
 
 	for _, mod := range m.Mods {
@@ -120,6 +133,23 @@ func (m Manifest) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+func validateRequiredArtifactURL(raw, label, suffix string) error {
+	if raw == "" {
+		return fmt.Errorf("%s must be non-empty", label)
+	}
+	if err := validateURLScheme(raw, label, "http", "https"); err != nil {
+		return err
+	}
+	filename, err := inferFilenameFromURL(raw)
+	if err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	if !strings.HasSuffix(strings.ToLower(filename), strings.ToLower(suffix)) {
+		return fmt.Errorf("%s must end with %s: %s", label, suffix, filename)
+	}
 	return nil
 }
 
