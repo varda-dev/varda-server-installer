@@ -53,17 +53,13 @@ func FetchRemoteManifest(rawURL string) (Manifest, error) {
 }
 
 func manifestCheckSummary(manifest Manifest) string {
-	neoForgeVersion, err := inferNeoForgeVersionFromURL(manifest.NeoForge.InstallerURL)
-	if err != nil {
-		neoForgeVersion = manifest.NeoForge.InstallerURL
-	}
 	return fmt.Sprintf(
 		"Manifest check:\n  schema:         %d\n  pack:           %s\n  version:        %s\n  minecraft:      %s\n  NeoForge:       %s\n  mods:           %d (sha1)\n  server config:  %s\n",
 		manifest.SchemaVersion,
 		manifest.Pack,
 		manifest.packVersionString(),
 		manifest.Minecraft,
-		neoForgeVersion,
+		manifest.NeoForge.Version,
 		len(manifest.Mods),
 		serverConfigSummary(manifest.ServerConfig),
 	)

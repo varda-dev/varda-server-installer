@@ -12,14 +12,14 @@ var javaCommand = exec.Command
 var downloadFile = downloadToFile
 
 func InstallOrUpdateNeoForge(targetDir string, desired NeoForgeManifest, force bool) (string, error) {
+	if desired.Version == "" {
+		return "", fmt.Errorf("manifest neoforge.version must be non-empty")
+	}
 	if desired.InstallerURL == "" {
 		return "", fmt.Errorf("manifest neoforge.installer_url must be non-empty")
 	}
 
-	desiredVersion, err := inferNeoForgeVersionFromURL(desired.InstallerURL)
-	if err != nil {
-		return "", err
-	}
+	desiredVersion := desired.Version
 
 	desiredDir := installedNeoForgeVersionDir(targetDir, desiredVersion)
 	installed, err := installedNeoForgeVersions(targetDir)
@@ -56,16 +56,8 @@ func InstallOrUpdateNeoForge(targetDir string, desired NeoForgeManifest, force b
 	}
 	installerPath := filepath.Join(tempDir, installerName)
 	var checks []DownloadChecks
-	if desired.SHA1URL != "" {
-		rawSHA1, err := downloadURLToBytes(desired.SHA1URL)
-		if err != nil {
-			return "", fmt.Errorf("download NeoForge installer sha1: %w", err)
-		}
-		expectedSHA1, err := parseSHA1Digest(rawSHA1, "NeoForge installer sha1")
-		if err != nil {
-			return "", err
-		}
-		checks = append(checks, DownloadChecks{SHA1: expectedSHA1})
+	if desired.SHA1 != "" {
+		checks = append(checks, DownloadChecks{SHA1: desired.SHA1})
 	}
 	if err := downloadFile(desired.InstallerURL, installerPath, force, "NeoForge installer", checks...); err != nil {
 		return "", err

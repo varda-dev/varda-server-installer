@@ -55,29 +55,3 @@ func inferFilenameFromURL(raw string) (string, error) {
 	}
 	return url.PathUnescape(name)
 }
-
-func inferNeoForgeVersionFromURL(raw string) (string, error) {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return "", err
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", fmt.Errorf("unsupported NeoForge URL scheme: %s", parsed.Scheme)
-	}
-	if parsed.Host == "" {
-		return "", fmt.Errorf("NeoForge URL must include a host: %s", raw)
-	}
-
-	installerName := path.Base(parsed.EscapedPath())
-	versionDir := path.Base(path.Dir(parsed.EscapedPath()))
-	expected := fmt.Sprintf("neoforge-%s-installer.jar", versionDir)
-	if installerName != expected {
-		return "", fmt.Errorf("could not infer NeoForge version from URL: %s", raw)
-	}
-
-	if !strings.Contains(parsed.Path, "/releases/net/neoforged/neoforge/") {
-		return "", fmt.Errorf("could not infer NeoForge version from URL: %s", raw)
-	}
-
-	return url.PathUnescape(versionDir)
-}

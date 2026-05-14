@@ -61,18 +61,6 @@ func TestParseJavaVersion(t *testing.T) {
 	}
 }
 
-func TestInferNeoForgeVersionFromURL(t *testing.T) {
-	t.Parallel()
-
-	got, err := inferNeoForgeVersionFromURL("https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.83/neoforge-21.1.83-installer.jar")
-	if err != nil {
-		t.Fatalf("inferNeoForgeVersionFromURL() error = %v", err)
-	}
-	if got != "21.1.83" {
-		t.Fatalf("inferNeoForgeVersionFromURL() = %q, want %q", got, "21.1.83")
-	}
-}
-
 func TestInferFilenameFromURL(t *testing.T) {
 	t.Parallel()
 
@@ -169,8 +157,9 @@ func TestLoadManifestFromBytes(t *testing.T) {
   "version": "0.1.4",
   "minecraft": "1.21.1",
   "neoforge": {
+    "version": "21.1.228",
     "installer_url": "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar",
-    "sha1_url": "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar.sha1"
+    "sha1": "0123456789abcdef0123456789abcdef01234567"
   },
   "server_config": {
     "url": "https://example.invalid/server-config.zip",
@@ -194,6 +183,9 @@ func TestLoadManifestFromBytes(t *testing.T) {
 	if manifest.Pack != "varda" || manifest.Version != "0.1.4" || manifest.NeoForge.InstallerURL == "" {
 		t.Fatalf("LoadManifestFromBytes() = %#v", manifest)
 	}
+	if manifest.NeoForge.Version != "21.1.228" || manifest.NeoForge.SHA1 != "0123456789abcdef0123456789abcdef01234567" {
+		t.Fatalf("LoadManifestFromBytes() neoforge = %#v", manifest.NeoForge)
+	}
 	if len(manifest.Mods) != 1 || manifest.Mods[0].URL != "https://example.invalid/example.jar" {
 		t.Fatalf("LoadManifestFromBytes() mods = %#v", manifest.Mods)
 	}
@@ -209,6 +201,28 @@ func TestManifestValidateAcceptsSimplifiedManifest(t *testing.T) {
 
 	if err := manifest.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestManifestValidateRejectsMissingNeoForgeVersion(t *testing.T) {
+	t.Parallel()
+
+	manifest := validTestManifest()
+	manifest.NeoForge.Version = ""
+
+	if err := manifest.Validate(); err == nil || !strings.Contains(strings.ToLower(err.Error()), "neoforge.version") {
+		t.Fatalf("Validate() error = %v, want version rejection", err)
+	}
+}
+
+func TestManifestValidateRejectsInvalidNeoForgeSHA1(t *testing.T) {
+	t.Parallel()
+
+	manifest := validTestManifest()
+	manifest.NeoForge.SHA1 = "bad"
+
+	if err := manifest.Validate(); err == nil || !strings.Contains(strings.ToLower(err.Error()), "neoforge.sha1") {
+		t.Fatalf("Validate() error = %v, want sha1 rejection", err)
 	}
 }
 
@@ -320,7 +334,7 @@ func TestManifestValidateRejectsInvalidServerConfigSHA1(t *testing.T) {
 	}
 }
 
-func TestManifestValidateAcceptsNeoForgeSHA1URL(t *testing.T) {
+func TestManifestValidateAcceptsNeoForgeSHA1(t *testing.T) {
 	t.Parallel()
 
 	manifest, err := LoadManifestFromBytes([]byte(`{
@@ -329,8 +343,9 @@ func TestManifestValidateAcceptsNeoForgeSHA1URL(t *testing.T) {
   "version": "0.1.4",
   "minecraft": "1.21.1",
   "neoforge": {
+    "version": "21.1.228",
     "installer_url": "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar",
-    "sha1_url": "  file:///tmp/neoforge.sha1  "
+    "sha1": "  0123456789abcdef0123456789abcdef01234567  "
   },
   "mods": [
     {
@@ -346,8 +361,8 @@ func TestManifestValidateAcceptsNeoForgeSHA1URL(t *testing.T) {
 	if err := manifest.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if manifest.NeoForge.SHA1URL != "file:///tmp/neoforge.sha1" {
-		t.Fatalf("normalize() = %q", manifest.NeoForge.SHA1URL)
+	if manifest.NeoForge.SHA1 != "0123456789abcdef0123456789abcdef01234567" {
+		t.Fatalf("normalize() = %q", manifest.NeoForge.SHA1)
 	}
 }
 
@@ -384,7 +399,7 @@ func TestWriteInstallDiagnosticsWritesOnlyDiagnostics(t *testing.T) {
 func TestCheckManifestDoesNotRequireTargetDirOrCreateIt(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "missing-target")
 	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
-	raw := []byte(`{"schema_version":2,"pack":"varda","version":"0.1.4","minecraft":"1.21.1","neoforge":{"installer_url":"https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"},"mods":[{"url":"https://example.invalid/example.jar","sha1":"0123456789abcdef0123456789abcdef01234567"}]}`)
+	raw := []byte(`{"schema_version":2,"pack":"varda","version":"0.1.4","minecraft":"1.21.1","neoforge":{"version":"21.1.228","installer_url":"https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"},"mods":[{"url":"https://example.invalid/example.jar","sha1":"0123456789abcdef0123456789abcdef01234567"}]}`)
 	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +416,7 @@ func TestCheckManifestDoesNotRequireTargetDirOrCreateIt(t *testing.T) {
 func TestCheckAcceptsSimplifiedManifest(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "missing-target")
 	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
-	raw := []byte(`{"schema_version":2,"pack":"varda","version":"0.1.4","minecraft":"1.21.1","neoforge":{"installer_url":"https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"},"mods":[{"url":"https://example.invalid/example.jar","sha1":"0123456789abcdef0123456789abcdef01234567"}]}`)
+	raw := []byte(`{"schema_version":2,"pack":"varda","version":"0.1.4","minecraft":"1.21.1","neoforge":{"version":"21.1.228","installer_url":"https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"},"mods":[{"url":"https://example.invalid/example.jar","sha1":"0123456789abcdef0123456789abcdef01234567"}]}`)
 	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -572,13 +587,10 @@ func TestInstallOrUpdateNeoForgeUsesDesiredManifest(t *testing.T) {
 	if err := os.WriteFile(sourceInstaller, installerPayload, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sha1Path := filepath.Join(root, "neoforge.sha1")
-	if err := os.WriteFile(sha1Path, []byte(installerSHA1+"  neoforge-"+desiredVersion+"-installer.jar\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	desired := NeoForgeManifest{
-		InstallerURL: "https://example.invalid/releases/net/neoforged/neoforge/" + desiredVersion + "/neoforge-" + desiredVersion + "-installer.jar",
-		SHA1URL:      fileURL(sha1Path),
+		Version:      desiredVersion,
+		InstallerURL: "https://example.invalid/releases/net/neoforged/neoforge/21.1.999/neoforge-21.1.999-installer.jar",
+		SHA1:         installerSHA1,
 	}
 
 	oldJavaCommand := javaCommand
@@ -589,6 +601,15 @@ func TestInstallOrUpdateNeoForgeUsesDesiredManifest(t *testing.T) {
 		return cmd
 	}
 	downloadFile = func(rawURL, targetPath string, force bool, label string, checks ...DownloadChecks) error {
+		if strings.Contains(rawURL, ".sha1") {
+			t.Fatalf("downloadFile() unexpectedly fetched sha1 URL: %s", rawURL)
+		}
+		if rawURL != desired.InstallerURL {
+			t.Fatalf("downloadFile() rawURL = %q, want %q", rawURL, desired.InstallerURL)
+		}
+		if len(checks) != 1 || checks[0].SHA1 != installerSHA1 {
+			t.Fatalf("downloadFile() checks = %#v, want one sha1 check", checks)
+		}
 		return downloadToFile(fileURL(sourceInstaller), targetPath, force, label, checks...)
 	}
 	defer func() {
@@ -938,7 +959,9 @@ func validTestManifest() Manifest {
 		Version:       "0.1.4",
 		Minecraft:     "1.21.1",
 		NeoForge: NeoForgeManifest{
+			Version:      "21.1.228",
 			InstallerURL: "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar",
+			SHA1:         strings.Repeat("3", 40),
 		},
 		ServerConfig: &ServerConfigManifest{
 			URL:  "https://example.invalid/server-config.zip",

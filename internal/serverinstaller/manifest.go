@@ -24,8 +24,9 @@ type Manifest struct {
 }
 
 type NeoForgeManifest struct {
+	Version      string `json:"version"`
 	InstallerURL string `json:"installer_url"`
-	SHA1URL      string `json:"sha1_url,omitempty"`
+	SHA1         string `json:"sha1,omitempty"`
 }
 
 type ServerConfigManifest struct {
@@ -55,8 +56,9 @@ func (m *Manifest) normalize() {
 	m.Pack = strings.TrimSpace(m.Pack)
 	m.Version = strings.TrimSpace(m.Version)
 	m.Minecraft = strings.TrimSpace(m.Minecraft)
+	m.NeoForge.Version = strings.TrimSpace(m.NeoForge.Version)
 	m.NeoForge.InstallerURL = strings.TrimSpace(m.NeoForge.InstallerURL)
-	m.NeoForge.SHA1URL = strings.TrimSpace(m.NeoForge.SHA1URL)
+	m.NeoForge.SHA1 = strings.TrimSpace(m.NeoForge.SHA1)
 	if m.ServerConfig != nil {
 		m.ServerConfig.URL = strings.TrimSpace(m.ServerConfig.URL)
 		m.ServerConfig.SHA1 = strings.TrimSpace(m.ServerConfig.SHA1)
@@ -81,14 +83,14 @@ func (m Manifest) Validate() error {
 	if m.Version == "" {
 		return fmt.Errorf("manifest version must be non-empty")
 	}
+	if m.NeoForge.Version == "" {
+		return fmt.Errorf("manifest neoforge.version must be non-empty")
+	}
 	if err := validateURLScheme(m.NeoForge.InstallerURL, "manifest neoforge.installer_url", "http", "https"); err != nil {
 		return err
 	}
-	if _, err := inferNeoForgeVersionFromURL(m.NeoForge.InstallerURL); err != nil {
-		return err
-	}
-	if m.NeoForge.SHA1URL != "" {
-		if err := validateURLScheme(m.NeoForge.SHA1URL, "manifest neoforge.sha1_url", "http", "https", "file"); err != nil {
+	if m.NeoForge.SHA1 != "" {
+		if err := validateSHA1Hex(m.NeoForge.SHA1, "manifest neoforge.sha1"); err != nil {
 			return err
 		}
 	}
