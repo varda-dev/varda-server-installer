@@ -15,6 +15,13 @@ import (
 
 const maxManifestSize = 5 << 20
 
+var httpClient = &http.Client{
+	Timeout: 10 * time.Minute,
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+	},
+}
+
 var statFile = os.Stat
 var renameFile = os.Rename
 var removeFile = os.Remove
@@ -25,58 +32,21 @@ type DownloadChecks struct {
 }
 
 func downloadURLToBytes(rawURL string) ([]byte, error) {
-	parsed, err := url.Parse(rawURL)
+	source, err := openDownload(rawURL)
 	if err != nil {
 		return nil, err
 	}
+	defer source.Close()
 
-	switch parsed.Scheme {
-	case "file":
-		sourcePath := parsed.Path
-		if runtime.GOOS == "windows" && strings.HasPrefix(sourcePath, "/") && len(sourcePath) > 2 && sourcePath[2] == ':' {
-			sourcePath = sourcePath[1:]
-		}
-		sourcePath = filepath.FromSlash(sourcePath)
-		if sourcePath == "" {
-			return nil, fmt.Errorf("file URL has no path: %s", rawURL)
-		}
-		data, err := os.ReadFile(sourcePath)
-		if err != nil {
-			return nil, err
-		}
-		return data, nil
-
-	case "http", "https":
-		client := &http.Client{
-			Timeout: 10 * time.Minute,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-			},
-		}
-		resp, err := client.Get(rawURL)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-			return nil, fmt.Errorf("download failed: HTTP %d %s\n%s", resp.StatusCode, resp.Status, strings.TrimSpace(string(body)))
-		}
-
-		limited := io.LimitReader(resp.Body, maxManifestSize+1)
-		data, err := io.ReadAll(limited)
-		if err != nil {
-			return nil, err
-		}
-		if len(data) > maxManifestSize {
-			return nil, fmt.Errorf("manifest exceeds maximum size of %d bytes", maxManifestSize)
-		}
-		return data, nil
-
-	default:
-		return nil, fmt.Errorf("unsupported URL scheme: %s", parsed.Scheme)
+	limited := io.LimitReader(source, maxManifestSize+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
 	}
+	if len(data) > maxManifestSize {
+		return nil, fmt.Errorf("manifest exceeds maximum size of %d bytes", maxManifestSize)
+	}
+	return data, nil
 }
 
 func downloadToFile(rawURL, targetPath string, force bool, label string, checks ...DownloadChecks) error {
@@ -187,9 +157,20 @@ func replaceFile(tempPath, targetPath string) error {
 }
 
 func writeDownloadedContent(dest *os.File, rawURL string) error {
-	parsed, err := url.Parse(rawURL)
+	source, err := openDownload(rawURL)
 	if err != nil {
 		return err
+	}
+	defer source.Close()
+
+	_, err = io.Copy(dest, source)
+	return err
+}
+
+func openDownload(rawURL string) (io.ReadCloser, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
 	}
 
 	switch parsed.Scheme {
@@ -200,39 +181,23 @@ func writeDownloadedContent(dest *os.File, rawURL string) error {
 		}
 		sourcePath = filepath.FromSlash(sourcePath)
 		if sourcePath == "" {
-			return fmt.Errorf("file URL has no path: %s", rawURL)
+			return nil, fmt.Errorf("file URL has no path: %s", rawURL)
 		}
-		source, err := os.Open(sourcePath)
-		if err != nil {
-			return err
-		}
-		defer source.Close()
-
-		_, err = io.Copy(dest, source)
-		return err
+		return os.Open(sourcePath)
 
 	case "http", "https":
-		client := &http.Client{
-			Timeout: 10 * time.Minute,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-			},
-		}
-		resp, err := client.Get(rawURL)
+		resp, err := httpClient.Get(rawURL)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		defer resp.Body.Close()
-
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-			return fmt.Errorf("download failed: HTTP %d %s\n%s", resp.StatusCode, resp.Status, strings.TrimSpace(string(body)))
+			resp.Body.Close()
+			return nil, fmt.Errorf("download failed: HTTP %d %s\n%s", resp.StatusCode, resp.Status, strings.TrimSpace(string(body)))
 		}
-
-		_, err = io.Copy(dest, resp.Body)
-		return err
+		return resp.Body, nil
 
 	default:
-		return fmt.Errorf("unsupported URL scheme: %s", parsed.Scheme)
+		return nil, fmt.Errorf("unsupported URL scheme: %s", parsed.Scheme)
 	}
 }

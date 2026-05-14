@@ -29,7 +29,7 @@ func WriteInstallDiagnostics(targetDir string, manifest Manifest) error {
 	if err := os.MkdirAll(vardaDir(targetDir), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(packVersionPath(targetDir), []byte(manifest.packVersionString()+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(packVersionPath(targetDir), []byte(manifest.Version+"\n"), 0o644); err != nil {
 		return fmt.Errorf("write pack version: %w", err)
 	}
 	if err := os.WriteFile(installerVersionPath(targetDir), []byte(Version+"\n"), 0o644); err != nil {
@@ -57,7 +57,7 @@ func manifestCheckSummary(manifest Manifest) string {
 		"Manifest check:\n  schema:         %d\n  pack:           %s\n  version:        %s\n  minecraft:      %s\n  NeoForge:       %s\n  mods:           %d (sha1)\n  server config:  %s\n",
 		manifest.SchemaVersion,
 		manifest.Pack,
-		manifest.packVersionString(),
+		manifest.Version,
 		manifest.Minecraft,
 		manifest.NeoForge.Version,
 		len(manifest.Mods),

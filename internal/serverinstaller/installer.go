@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 )
 
 type Options struct {
@@ -38,7 +37,6 @@ func Run(args []string) error {
 	if err != nil {
 		return err
 	}
-	manifest.normalize()
 	if err := manifest.Validate(); err != nil {
 		return err
 	}
@@ -112,7 +110,7 @@ func parseOptions(args []string) (Options, error) {
 	fs.StringVar(&opts.ManifestURL, "manifest-url", defaultManifestURL, "remote manifest URL")
 	fs.IntVar(&opts.DownloadWorkers, "download-workers", 6, "mod download worker count")
 
-	if err := fs.Parse(normalizeInstallerArgs(args)); err != nil {
+	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fs.Usage()
 			return opts, flag.ErrHelp
@@ -130,52 +128,6 @@ func parseOptions(args []string) (Options, error) {
 	}
 
 	return opts, nil
-}
-
-func normalizeInstallerArgs(args []string) []string {
-	normalized := make([]string, len(args))
-	for i, arg := range args {
-		switch arg {
-		case "--help":
-			normalized[i] = "-help"
-		case "--version":
-			normalized[i] = "-version"
-		case "--check-manifest":
-			normalized[i] = "-check-manifest"
-		case "--check":
-			normalized[i] = "-check"
-		case "--dir":
-			normalized[i] = "-dir"
-		case "--force":
-			normalized[i] = "-force"
-		case "--manifest-url":
-			normalized[i] = "-manifest-url"
-		case "--download-workers":
-			normalized[i] = "-download-workers"
-		default:
-			switch {
-			case strings.HasPrefix(arg, "--help="):
-				normalized[i] = "-help" + strings.TrimPrefix(arg, "--help")
-			case strings.HasPrefix(arg, "--version="):
-				normalized[i] = "-version" + strings.TrimPrefix(arg, "--version")
-			case strings.HasPrefix(arg, "--check-manifest="):
-				normalized[i] = "-check-manifest" + strings.TrimPrefix(arg, "--check-manifest")
-			case strings.HasPrefix(arg, "--check="):
-				normalized[i] = "-check" + strings.TrimPrefix(arg, "--check")
-			case strings.HasPrefix(arg, "--dir="):
-				normalized[i] = "-dir" + strings.TrimPrefix(arg, "--dir")
-			case strings.HasPrefix(arg, "--force="):
-				normalized[i] = "-force" + strings.TrimPrefix(arg, "--force")
-			case strings.HasPrefix(arg, "--manifest-url="):
-				normalized[i] = "-manifest-url" + strings.TrimPrefix(arg, "--manifest-url")
-			case strings.HasPrefix(arg, "--download-workers="):
-				normalized[i] = "-download-workers" + strings.TrimPrefix(arg, "--download-workers")
-			default:
-				normalized[i] = arg
-			}
-		}
-	}
-	return normalized
 }
 
 func printInstallerUsage(w io.Writer) {

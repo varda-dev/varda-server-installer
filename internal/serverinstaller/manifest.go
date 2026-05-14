@@ -71,8 +71,6 @@ func (m *Manifest) normalize() {
 	}
 }
 
-func (m Manifest) packVersionString() string { return m.Version }
-
 func (m Manifest) Validate() error {
 	if m.SchemaVersion != supportedManifestSchemaVersion {
 		return fmt.Errorf("unsupported manifest schema version: %d", m.SchemaVersion)
@@ -107,33 +105,15 @@ func (m Manifest) Validate() error {
 	}
 
 	for _, mod := range m.Mods {
-		label := mod.Name
-		filename, err := inferFilenameFromURL(mod.URL)
+		spec, err := modSpecFromManifestMod(mod)
 		if err != nil {
-			if label == "" {
-				label = mod.URL
-			}
-			return fmt.Errorf("%s: %w", label, err)
-		}
-		if label == "" {
-			label = filename
-		}
-		if !isSafeModFilename(filename) {
-			return fmt.Errorf("%s: unsafe or non-jar mod filename in manifest: %s", label, filename)
-		}
-		if err := validateURLScheme(mod.URL, "manifest mod url", "http", "https", "file"); err != nil {
-			return fmt.Errorf("%s: %w", label, err)
-		}
-		if mod.SHA1 == "" {
-			return fmt.Errorf("%s: manifest mod sha1 must be non-empty", label)
-		}
-		if err := validateSHA1Hex(mod.SHA1, fmt.Sprintf("manifest mod sha1 for %s", label)); err != nil {
 			return err
 		}
-		if mod.Size < 0 {
-			return fmt.Errorf("%s: manifest mod size must be positive when present", label)
-		}
 		if mod.WebsiteURL != "" {
+			label := mod.Name
+			if label == "" {
+				label = spec.FileName
+			}
 			if err := validateURLScheme(mod.WebsiteURL, "manifest mod website_url", "http", "https"); err != nil {
 				return fmt.Errorf("%s: %w", label, err)
 			}

@@ -28,34 +28,11 @@ func ReconcileMods(targetDir string, mods []ManifestMod, force bool, workerCount
 
 	specs := make([]ModSpec, 0, len(mods))
 	for _, mod := range mods {
-		filename, err := inferFilenameFromURL(mod.URL)
+		spec, err := modSpecFromManifestMod(mod)
 		if err != nil {
-			label := mod.Name
-			if label == "" {
-				label = mod.URL
-			}
-			return fmt.Errorf("%s: %w", label, err)
-		}
-		label := mod.Name
-		if label == "" {
-			label = filename
-		}
-		if !isSafeModFilename(filename) {
-			return fmt.Errorf("%s: unsafe or non-jar mod filename in manifest: %s", label, filename)
-		}
-		if err := validateURLScheme(mod.URL, "manifest mod url", "http", "https", "file"); err != nil {
-			return fmt.Errorf("%s: %w", label, err)
-		}
-		if mod.SHA1 == "" {
-			return fmt.Errorf("%s: manifest mod sha1 must be non-empty", label)
-		}
-		if err := validateSHA1Hex(mod.SHA1, fmt.Sprintf("manifest mod sha1 for %s", label)); err != nil {
 			return err
 		}
-		if mod.Size < 0 {
-			return fmt.Errorf("%s: manifest mod size must be positive when present", label)
-		}
-		specs = append(specs, ModSpec{Name: mod.Name, FileName: filename, URL: mod.URL, SHA1: mod.SHA1, Size: mod.Size})
+		specs = append(specs, spec)
 	}
 
 	modsPath := modsDir(targetDir)
@@ -188,4 +165,34 @@ func modLabel(mod ModSpec) string {
 		return mod.Name
 	}
 	return mod.FileName
+}
+
+func modSpecFromManifestMod(mod ManifestMod) (ModSpec, error) {
+	label := mod.Name
+	filename, err := inferFilenameFromURL(mod.URL)
+	if err != nil {
+		if label == "" {
+			label = mod.URL
+		}
+		return ModSpec{}, fmt.Errorf("%s: %w", label, err)
+	}
+	if label == "" {
+		label = filename
+	}
+	if !isSafeModFilename(filename) {
+		return ModSpec{}, fmt.Errorf("%s: unsafe or non-jar mod filename in manifest: %s", label, filename)
+	}
+	if err := validateURLScheme(mod.URL, "manifest mod url", "http", "https", "file"); err != nil {
+		return ModSpec{}, fmt.Errorf("%s: %w", label, err)
+	}
+	if mod.SHA1 == "" {
+		return ModSpec{}, fmt.Errorf("%s: manifest mod sha1 must be non-empty", label)
+	}
+	if err := validateSHA1Hex(mod.SHA1, fmt.Sprintf("manifest mod sha1 for %s", label)); err != nil {
+		return ModSpec{}, err
+	}
+	if mod.Size < 0 {
+		return ModSpec{}, fmt.Errorf("%s: manifest mod size must be positive when present", label)
+	}
+	return ModSpec{Name: mod.Name, FileName: filename, URL: mod.URL, SHA1: mod.SHA1, Size: mod.Size}, nil
 }

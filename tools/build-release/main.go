@@ -152,8 +152,7 @@ func parseOptions(args []string) (options, error) {
 	fs.BoolVar(&opts.Clean, "c", false, "remove output directory before building")
 	fs.BoolVar(&opts.Verbose, "verbose", false, "print commands and Go output")
 
-	normalized := normalizeArgs(args)
-	if err := fs.Parse(normalized); err != nil {
+	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return opts, nil
 		}
@@ -171,44 +170,6 @@ func parseOptions(args []string) (options, error) {
 		return opts, fmt.Errorf("invalid version %q: use letters, numbers, dots, underscores, and hyphens only", opts.Version)
 	}
 	return opts, nil
-}
-
-func normalizeArgs(args []string) []string {
-	normalized := make([]string, len(args))
-	for i, arg := range args {
-		switch arg {
-		case "--help":
-			normalized[i] = "-help"
-		case "--version":
-			normalized[i] = "-version"
-		case "--out":
-			normalized[i] = "-out"
-		case "--force":
-			normalized[i] = "-force"
-		case "--clean":
-			normalized[i] = "-clean"
-		case "--verbose":
-			normalized[i] = "-verbose"
-		default:
-			switch {
-			case strings.HasPrefix(arg, "--help="):
-				normalized[i] = "-help" + strings.TrimPrefix(arg, "--help")
-			case strings.HasPrefix(arg, "--version="):
-				normalized[i] = "-version" + strings.TrimPrefix(arg, "--version")
-			case strings.HasPrefix(arg, "--out="):
-				normalized[i] = "-out" + strings.TrimPrefix(arg, "--out")
-			case strings.HasPrefix(arg, "--force="):
-				normalized[i] = "-force" + strings.TrimPrefix(arg, "--force")
-			case strings.HasPrefix(arg, "--clean="):
-				normalized[i] = "-clean" + strings.TrimPrefix(arg, "--clean")
-			case strings.HasPrefix(arg, "--verbose="):
-				normalized[i] = "-verbose" + strings.TrimPrefix(arg, "--verbose")
-			default:
-				normalized[i] = arg
-			}
-		}
-	}
-	return normalized
 }
 
 func findRepoRoot() (string, error) {

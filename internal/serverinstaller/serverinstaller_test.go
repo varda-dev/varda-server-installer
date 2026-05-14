@@ -189,8 +189,8 @@ func TestLoadManifestFromBytes(t *testing.T) {
 	if len(manifest.Mods) != 1 || manifest.Mods[0].URL != "https://example.invalid/example.jar" {
 		t.Fatalf("LoadManifestFromBytes() mods = %#v", manifest.Mods)
 	}
-	if got := manifest.packVersionString(); got != "0.1.4" {
-		t.Fatalf("packVersionString() = %q, want %q", got, "0.1.4")
+	if got := manifest.Version; got != "0.1.4" {
+		t.Fatalf("Version = %q, want %q", got, "0.1.4")
 	}
 }
 

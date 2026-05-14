@@ -60,7 +60,7 @@ Security:
 - reject unsafe mod filenames
 - reject unsafe manifest URLs where appropriate
 - reject ZIP traversal and absolute ZIP paths
-- verify SHA-256 when manifest provides it
+- verify manifest-provided artifact hashes; current manifest artifact hashes are SHA1
 - do not execute manifest-provided commands
 - only external executable path allowed is established Java call for NeoForge installer
 
