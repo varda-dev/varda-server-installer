@@ -2,7 +2,6 @@ package serverinstaller
 
 import (
 	"bytes"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -11,7 +10,7 @@ import (
 
 const (
 	defaultManifestURL             = "https://varda-dev.github.io/varda-modpack/manifest.json"
-	supportedManifestSchemaVersion = 1
+	supportedManifestSchemaVersion = 2
 )
 
 type Manifest struct {
@@ -26,15 +25,20 @@ type Manifest struct {
 
 type NeoForgeManifest struct {
 	InstallerURL string `json:"installer_url"`
+	SHA1URL      string `json:"sha1_url,omitempty"`
 }
 
 type ServerConfigManifest struct {
-	URL    string `json:"url,omitempty"`
-	SHA256 string `json:"sha256,omitempty"`
+	URL  string `json:"url,omitempty"`
+	SHA1 string `json:"sha1,omitempty"`
 }
 
 type ManifestMod struct {
-	URL string `json:"url"`
+	Name       string `json:"name,omitempty"`
+	URL        string `json:"url"`
+	WebsiteURL string `json:"website_url,omitempty"`
+	SHA1       string `json:"sha1"`
+	Size       int64  `json:"size,omitempty"`
 }
 
 func LoadManifestFromBytes(data []byte) (Manifest, error) {
@@ -52,12 +56,16 @@ func (m *Manifest) normalize() {
 	m.Version = strings.TrimSpace(m.Version)
 	m.Minecraft = strings.TrimSpace(m.Minecraft)
 	m.NeoForge.InstallerURL = strings.TrimSpace(m.NeoForge.InstallerURL)
+	m.NeoForge.SHA1URL = strings.TrimSpace(m.NeoForge.SHA1URL)
 	if m.ServerConfig != nil {
 		m.ServerConfig.URL = strings.TrimSpace(m.ServerConfig.URL)
-		m.ServerConfig.SHA256 = strings.TrimSpace(m.ServerConfig.SHA256)
+		m.ServerConfig.SHA1 = strings.TrimSpace(m.ServerConfig.SHA1)
 	}
 	for i := range m.Mods {
+		m.Mods[i].Name = strings.TrimSpace(m.Mods[i].Name)
 		m.Mods[i].URL = strings.TrimSpace(m.Mods[i].URL)
+		m.Mods[i].WebsiteURL = strings.TrimSpace(m.Mods[i].WebsiteURL)
+		m.Mods[i].SHA1 = strings.TrimSpace(m.Mods[i].SHA1)
 	}
 }
 
@@ -79,31 +87,54 @@ func (m Manifest) Validate() error {
 	if _, err := inferNeoForgeVersionFromURL(m.NeoForge.InstallerURL); err != nil {
 		return err
 	}
+	if m.NeoForge.SHA1URL != "" {
+		if err := validateURLScheme(m.NeoForge.SHA1URL, "manifest neoforge.sha1_url", "http", "https", "file"); err != nil {
+			return err
+		}
+	}
 
 	if m.ServerConfig != nil && m.ServerConfig.URL != "" {
 		if err := validateURLScheme(m.ServerConfig.URL, "manifest server_config.url", "http", "https", "file"); err != nil {
 			return err
 		}
 	}
-	if m.ServerConfig != nil && m.ServerConfig.SHA256 != "" {
-		if len(m.ServerConfig.SHA256) != 64 {
-			return fmt.Errorf("manifest server_config.sha256 must be 64 hex characters")
-		}
-		if _, err := hex.DecodeString(m.ServerConfig.SHA256); err != nil {
-			return fmt.Errorf("manifest server_config.sha256 must be hex: %w", err)
+	if m.ServerConfig != nil && m.ServerConfig.SHA1 != "" {
+		if err := validateSHA1Hex(m.ServerConfig.SHA1, "manifest server_config.sha1"); err != nil {
+			return err
 		}
 	}
 
 	for _, mod := range m.Mods {
+		label := mod.Name
 		filename, err := inferFilenameFromURL(mod.URL)
 		if err != nil {
-			return fmt.Errorf("%w for %s", err, mod.URL)
+			if label == "" {
+				label = mod.URL
+			}
+			return fmt.Errorf("%s: %w", label, err)
+		}
+		if label == "" {
+			label = filename
 		}
 		if !isSafeModFilename(filename) {
-			return fmt.Errorf("unsafe or non-jar mod filename in manifest: %s", filename)
+			return fmt.Errorf("%s: unsafe or non-jar mod filename in manifest: %s", label, filename)
 		}
 		if err := validateURLScheme(mod.URL, "manifest mod url", "http", "https", "file"); err != nil {
-			return fmt.Errorf("%s for %s", err, filename)
+			return fmt.Errorf("%s: %w", label, err)
+		}
+		if mod.SHA1 == "" {
+			return fmt.Errorf("%s: manifest mod sha1 must be non-empty", label)
+		}
+		if err := validateSHA1Hex(mod.SHA1, fmt.Sprintf("manifest mod sha1 for %s", label)); err != nil {
+			return err
+		}
+		if mod.Size < 0 {
+			return fmt.Errorf("%s: manifest mod size must be positive when present", label)
+		}
+		if mod.WebsiteURL != "" {
+			if err := validateURLScheme(mod.WebsiteURL, "manifest mod website_url", "http", "https"); err != nil {
+				return fmt.Errorf("%s: %w", label, err)
+			}
 		}
 	}
 

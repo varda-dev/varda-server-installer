@@ -55,7 +55,19 @@ func InstallOrUpdateNeoForge(targetDir string, desired NeoForgeManifest, force b
 		return "", err
 	}
 	installerPath := filepath.Join(tempDir, installerName)
-	if err := downloadFile(desired.InstallerURL, installerPath, force, "NeoForge installer"); err != nil {
+	var checks []DownloadChecks
+	if desired.SHA1URL != "" {
+		rawSHA1, err := downloadURLToBytes(desired.SHA1URL)
+		if err != nil {
+			return "", fmt.Errorf("download NeoForge installer sha1: %w", err)
+		}
+		expectedSHA1, err := parseSHA1Digest(rawSHA1, "NeoForge installer sha1")
+		if err != nil {
+			return "", err
+		}
+		checks = append(checks, DownloadChecks{SHA1: expectedSHA1})
+	}
+	if err := downloadFile(desired.InstallerURL, installerPath, force, "NeoForge installer", checks...); err != nil {
 		return "", err
 	}
 

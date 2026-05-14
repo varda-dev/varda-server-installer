@@ -11,8 +11,11 @@ import (
 )
 
 type ModSpec struct {
+	Name     string
 	FileName string
 	URL      string
+	SHA1     string
+	Size     int64
 }
 
 func ReconcileMods(targetDir string, mods []ManifestMod, force bool, workerCount int) error {
@@ -27,15 +30,32 @@ func ReconcileMods(targetDir string, mods []ManifestMod, force bool, workerCount
 	for _, mod := range mods {
 		filename, err := inferFilenameFromURL(mod.URL)
 		if err != nil {
-			return fmt.Errorf("%w for %s", err, mod.URL)
+			label := mod.Name
+			if label == "" {
+				label = mod.URL
+			}
+			return fmt.Errorf("%s: %w", label, err)
+		}
+		label := mod.Name
+		if label == "" {
+			label = filename
 		}
 		if !isSafeModFilename(filename) {
-			return fmt.Errorf("unsafe or non-jar mod filename in manifest: %s", filename)
+			return fmt.Errorf("%s: unsafe or non-jar mod filename in manifest: %s", label, filename)
 		}
 		if err := validateURLScheme(mod.URL, "manifest mod url", "http", "https", "file"); err != nil {
-			return fmt.Errorf("%s for %s", err, filename)
+			return fmt.Errorf("%s: %w", label, err)
 		}
-		specs = append(specs, ModSpec{FileName: filename, URL: mod.URL})
+		if mod.SHA1 == "" {
+			return fmt.Errorf("%s: manifest mod sha1 must be non-empty", label)
+		}
+		if err := validateSHA1Hex(mod.SHA1, fmt.Sprintf("manifest mod sha1 for %s", label)); err != nil {
+			return err
+		}
+		if mod.Size < 0 {
+			return fmt.Errorf("%s: manifest mod size must be positive when present", label)
+		}
+		specs = append(specs, ModSpec{Name: mod.Name, FileName: filename, URL: mod.URL, SHA1: mod.SHA1, Size: mod.Size})
 	}
 
 	modsPath := modsDir(targetDir)
@@ -61,8 +81,20 @@ func ReconcileMods(targetDir string, mods []ManifestMod, force bool, workerCount
 				if info.IsDir() {
 					return fmt.Errorf("target mod path is a directory: %s", target)
 				}
-				if info.Size() > 0 {
-					fmt.Printf("Keeping current mod: %s\n", mod.FileName)
+				if info.Size() == 0 {
+					downloads = append(downloads, mod)
+					continue
+				}
+				if mod.Size > 0 && info.Size() != mod.Size {
+					downloads = append(downloads, mod)
+					continue
+				}
+				actualSHA1, err := sha1File(target)
+				if err != nil {
+					return err
+				}
+				if strings.EqualFold(actualSHA1, mod.SHA1) {
+					fmt.Printf("Keeping current mod: %s\n", modLabel(mod))
 					continue
 				}
 			}
@@ -73,7 +105,7 @@ func ReconcileMods(targetDir string, mods []ManifestMod, force bool, workerCount
 		downloads = append(downloads, mod)
 	}
 
-	if err := downloadMods(targetDir, downloads, force, workerCount); err != nil {
+	if err := downloadMods(targetDir, downloads, workerCount); err != nil {
 		return err
 	}
 
@@ -110,7 +142,7 @@ func ReconcileMods(targetDir string, mods []ManifestMod, force bool, workerCount
 	return nil
 }
 
-func downloadMods(targetDir string, mods []ModSpec, force bool, workerCount int) error {
+func downloadMods(targetDir string, mods []ModSpec, workerCount int) error {
 	if len(mods) == 0 {
 		return nil
 	}
@@ -125,9 +157,9 @@ func downloadMods(targetDir string, mods []ModSpec, force bool, workerCount int)
 		defer wg.Done()
 		for mod := range jobs {
 			target := filepath.Join(modsPath, mod.FileName)
-			if err := downloadToFile(mod.URL, target, force, mod.FileName); err != nil {
+			if err := downloadToFile(mod.URL, target, true, modLabel(mod), DownloadChecks{SHA1: mod.SHA1, Size: mod.Size}); err != nil {
 				mu.Lock()
-				errs = append(errs, fmt.Errorf("%s: %w", mod.FileName, err))
+				errs = append(errs, fmt.Errorf("%s: %w", modLabel(mod), err))
 				mu.Unlock()
 			}
 		}
@@ -149,4 +181,11 @@ func downloadMods(targetDir string, mods []ModSpec, force bool, workerCount int)
 	}
 
 	return nil
+}
+
+func modLabel(mod ModSpec) string {
+	if mod.Name != "" {
+		return mod.Name
+	}
+	return mod.FileName
 }

@@ -58,7 +58,8 @@ func manifestCheckSummary(manifest Manifest) string {
 		neoForgeVersion = manifest.NeoForge.InstallerURL
 	}
 	return fmt.Sprintf(
-		"Manifest check:\n  pack:           %s\n  version:        %s\n  minecraft:      %s\n  NeoForge:       %s\n  mods:           %d\n  server config:  %s\n",
+		"Manifest check:\n  schema:         %d\n  pack:           %s\n  version:        %s\n  minecraft:      %s\n  NeoForge:       %s\n  mods:           %d (sha1)\n  server config:  %s\n",
+		manifest.SchemaVersion,
 		manifest.Pack,
 		manifest.packVersionString(),
 		manifest.Minecraft,
@@ -70,6 +71,9 @@ func manifestCheckSummary(manifest Manifest) string {
 
 func serverConfigSummary(cfg *ServerConfigManifest) string {
 	if cfg != nil && cfg.URL != "" {
+		if cfg.SHA1 != "" {
+			return "present (sha1)"
+		}
 		return "present"
 	}
 	return "absent"

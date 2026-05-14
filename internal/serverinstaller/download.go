@@ -19,6 +19,11 @@ var statFile = os.Stat
 var renameFile = os.Rename
 var removeFile = os.Remove
 
+type DownloadChecks struct {
+	SHA1 string
+	Size int64
+}
+
 func downloadURLToBytes(rawURL string) ([]byte, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -74,7 +79,12 @@ func downloadURLToBytes(rawURL string) ([]byte, error) {
 	}
 }
 
-func downloadToFile(rawURL, targetPath string, force bool, label string) error {
+func downloadToFile(rawURL, targetPath string, force bool, label string, checks ...DownloadChecks) error {
+	var check DownloadChecks
+	if len(checks) > 0 {
+		check = checks[0]
+	}
+
 	if !force {
 		info, err := statFile(targetPath)
 		if err == nil {
@@ -82,6 +92,20 @@ func downloadToFile(rawURL, targetPath string, force bool, label string) error {
 				return fmt.Errorf("target path is a directory: %s", targetPath)
 			}
 			if info.Size() > 0 {
+				if check.Size > 0 && info.Size() != check.Size {
+					goto download
+				}
+				if check.SHA1 != "" {
+					actual, err := sha1File(targetPath)
+					if err != nil {
+						return err
+					}
+					if strings.EqualFold(actual, check.SHA1) {
+						fmt.Printf("Keeping current %s: %s\n", label, targetPath)
+						return nil
+					}
+					goto download
+				}
 				fmt.Printf("Keeping current %s: %s\n", label, targetPath)
 				return nil
 			}
@@ -91,6 +115,7 @@ func downloadToFile(rawURL, targetPath string, force bool, label string) error {
 		}
 	}
 
+download:
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return err
 	}
@@ -108,8 +133,24 @@ func downloadToFile(rawURL, targetPath string, force bool, label string) error {
 		tmp.Close()
 		return err
 	}
+	if check.Size > 0 {
+		info, err := tmp.Stat()
+		if err != nil {
+			tmp.Close()
+			return err
+		}
+		if info.Size() != check.Size {
+			tmp.Close()
+			return fmt.Errorf("%s size mismatch: got %d want %d", label, info.Size(), check.Size)
+		}
+	}
 	if err := tmp.Close(); err != nil {
 		return err
+	}
+	if check.SHA1 != "" {
+		if err := verifyFileSHA1(tmpName, check.SHA1, label); err != nil {
+			return err
+		}
 	}
 
 	return replaceFile(tmpName, targetPath)

@@ -2,8 +2,6 @@ package serverinstaller
 
 import (
 	"archive/zip"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -22,37 +20,11 @@ func installServerConfig(targetDir string, manifest Manifest) error {
 	}
 
 	cachePath := filepath.Join(cacheDir(targetDir), "server-config.zip")
-	if err := downloadToFile(manifest.ServerConfig.URL, cachePath, true, "server config"); err != nil {
+	if err := downloadToFile(manifest.ServerConfig.URL, cachePath, true, "server config", DownloadChecks{SHA1: manifest.ServerConfig.SHA1}); err != nil {
 		return err
-	}
-
-	if manifest.ServerConfig.SHA256 != "" {
-		if err := verifyFileSHA256(cachePath, manifest.ServerConfig.SHA256); err != nil {
-			return err
-		}
 	}
 
 	return extractZipFile(cachePath, targetDir)
-}
-
-func verifyFileSHA256(path string, expected string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	digest := sha256.New()
-	if _, err := io.Copy(digest, file); err != nil {
-		return err
-	}
-
-	actual := hex.EncodeToString(digest.Sum(nil))
-	if !strings.EqualFold(actual, expected) {
-		return fmt.Errorf("server config sha256 mismatch: got %s want %s", actual, expected)
-	}
-
-	return nil
 }
 
 func extractZipFile(zipPath, targetDir string) error {

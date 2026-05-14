@@ -3,6 +3,8 @@ package serverinstaller
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha1"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -162,20 +164,25 @@ func TestLoadManifestFromBytes(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte(`{
-  "schema_version": 1,
+  "schema_version": 2,
   "pack": "varda",
   "version": "0.1.4",
   "minecraft": "1.21.1",
   "neoforge": {
-    "installer_url": "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"
+    "installer_url": "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar",
+    "sha1_url": "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar.sha1"
   },
   "server_config": {
     "url": "https://example.invalid/server-config.zip",
-    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    "sha1": "0123456789abcdef0123456789abcdef01234567"
   },
   "mods": [
     {
-      "url": "https://example.invalid/example.jar"
+      "name": "Example Mod",
+      "url": "https://example.invalid/example.jar",
+      "website_url": "https://example.invalid",
+      "sha1": "0123456789abcdef0123456789abcdef01234567",
+      "size": 1234
     }
   ]
 }`)
@@ -231,7 +238,7 @@ func TestManifestValidateRejectsWrongPack(t *testing.T) {
 	t.Parallel()
 
 	manifest := Manifest{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		Pack:          "other",
 		Version:       "1.0.0",
 		NeoForge: NeoForgeManifest{
@@ -248,7 +255,7 @@ func TestManifestValidateRejectsUnsafeModFilename(t *testing.T) {
 	t.Parallel()
 
 	manifest := validTestManifest()
-	manifest.Mods = []ManifestMod{{URL: "https://example.invalid/evil%5c.jar"}}
+	manifest.Mods = []ManifestMod{{URL: "https://example.invalid/evil%5c.jar", SHA1: strings.Repeat("1", 40)}}
 
 	if err := manifest.Validate(); err == nil || !strings.Contains(strings.ToLower(err.Error()), "unsafe") {
 		t.Fatalf("Validate() error = %v, want unsafe filename rejection", err)
@@ -259,7 +266,7 @@ func TestManifestValidateRejectsNonJarModFilename(t *testing.T) {
 	t.Parallel()
 
 	manifest := validTestManifest()
-	manifest.Mods = []ManifestMod{{URL: "https://example.invalid/example.zip"}}
+	manifest.Mods = []ManifestMod{{URL: "https://example.invalid/example.zip", SHA1: strings.Repeat("1", 40)}}
 
 	if err := manifest.Validate(); err == nil || !strings.Contains(strings.ToLower(err.Error()), "non-jar") {
 		t.Fatalf("Validate() error = %v, want non-jar rejection", err)
@@ -270,10 +277,77 @@ func TestManifestValidateRejectsMalformedModURL(t *testing.T) {
 	t.Parallel()
 
 	manifest := validTestManifest()
-	manifest.Mods = []ManifestMod{{URL: "https://"}}
+	manifest.Mods = []ManifestMod{{URL: "https://", SHA1: strings.Repeat("1", 40)}}
 
 	if err := manifest.Validate(); err == nil || !strings.Contains(strings.ToLower(err.Error()), "host") {
 		t.Fatalf("Validate() error = %v, want malformed URL rejection", err)
+	}
+}
+
+func TestManifestValidateRejectsSchemaVersion1(t *testing.T) {
+	t.Parallel()
+
+	manifest := validTestManifest()
+	manifest.SchemaVersion = 1
+
+	if err := manifest.Validate(); err == nil || !strings.Contains(strings.ToLower(err.Error()), "schema") {
+		t.Fatalf("Validate() error = %v, want schema rejection", err)
+	}
+}
+
+func TestManifestValidateRejectsInvalidModSHA1(t *testing.T) {
+	t.Parallel()
+
+	manifest := validTestManifest()
+	manifest.Mods[0].SHA1 = "not-a-sha1"
+
+	if err := manifest.Validate(); err == nil || !strings.Contains(strings.ToLower(err.Error()), "sha1") {
+		t.Fatalf("Validate() error = %v, want sha1 rejection", err)
+	}
+}
+
+func TestManifestValidateRejectsInvalidServerConfigSHA1(t *testing.T) {
+	t.Parallel()
+
+	manifest := validTestManifest()
+	manifest.ServerConfig = &ServerConfigManifest{
+		URL:  "https://example.invalid/server-config.zip",
+		SHA1: "bad",
+	}
+
+	if err := manifest.Validate(); err == nil || !strings.Contains(strings.ToLower(err.Error()), "server_config.sha1") {
+		t.Fatalf("Validate() error = %v, want server_config sha1 rejection", err)
+	}
+}
+
+func TestManifestValidateAcceptsNeoForgeSHA1URL(t *testing.T) {
+	t.Parallel()
+
+	manifest, err := LoadManifestFromBytes([]byte(`{
+  "schema_version": 2,
+  "pack": "varda",
+  "version": "0.1.4",
+  "minecraft": "1.21.1",
+  "neoforge": {
+    "installer_url": "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar",
+    "sha1_url": "  file:///tmp/neoforge.sha1  "
+  },
+  "mods": [
+    {
+      "url": "https://example.invalid/example.jar",
+      "sha1": "0123456789abcdef0123456789abcdef01234567"
+    }
+  ]
+}`))
+	if err != nil {
+		t.Fatalf("LoadManifestFromBytes() error = %v", err)
+	}
+
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if manifest.NeoForge.SHA1URL != "file:///tmp/neoforge.sha1" {
+		t.Fatalf("normalize() = %q", manifest.NeoForge.SHA1URL)
 	}
 }
 
@@ -310,7 +384,7 @@ func TestWriteInstallDiagnosticsWritesOnlyDiagnostics(t *testing.T) {
 func TestCheckManifestDoesNotRequireTargetDirOrCreateIt(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "missing-target")
 	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
-	raw := []byte(`{"schema_version":1,"pack":"varda","version":"0.1.4","minecraft":"1.21.1","neoforge":{"installer_url":"https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"},"mods":[{"url":"https://example.invalid/example.jar"}]}`)
+	raw := []byte(`{"schema_version":2,"pack":"varda","version":"0.1.4","minecraft":"1.21.1","neoforge":{"installer_url":"https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"},"mods":[{"url":"https://example.invalid/example.jar","sha1":"0123456789abcdef0123456789abcdef01234567"}]}`)
 	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +401,7 @@ func TestCheckManifestDoesNotRequireTargetDirOrCreateIt(t *testing.T) {
 func TestCheckAcceptsSimplifiedManifest(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "missing-target")
 	manifestPath := filepath.Join(t.TempDir(), "manifest.json")
-	raw := []byte(`{"schema_version":1,"pack":"varda","version":"0.1.4","minecraft":"1.21.1","neoforge":{"installer_url":"https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"},"mods":[{"url":"https://example.invalid/example.jar"}]}`)
+	raw := []byte(`{"schema_version":2,"pack":"varda","version":"0.1.4","minecraft":"1.21.1","neoforge":{"installer_url":"https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar"},"mods":[{"url":"https://example.invalid/example.jar","sha1":"0123456789abcdef0123456789abcdef01234567"}]}`)
 	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +507,7 @@ func TestReconcileModsRemovesUnmanagedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ReconcileMods(root, []ManifestMod{{URL: fileURL(source)}}, false, 6); err != nil {
+	if err := ReconcileMods(root, []ManifestMod{{URL: fileURL(source), SHA1: sha1HexOfFile(t, source)}}, false, 6); err != nil {
 		t.Fatalf("ReconcileMods() error = %v", err)
 	}
 
@@ -466,7 +540,7 @@ func TestReconcileModsUsesDecodedFilename(t *testing.T) {
 	}
 
 	modURL := "file://" + filepath.ToSlash(root) + "/Example%20Mod%2b%5b1%5d%27s.jar"
-	if err := ReconcileMods(root, []ManifestMod{{URL: modURL}}, false, 2); err != nil {
+	if err := ReconcileMods(root, []ManifestMod{{URL: modURL, SHA1: sha1HexOfFile(t, source)}}, false, 2); err != nil {
 		t.Fatalf("ReconcileMods() error = %v", err)
 	}
 
@@ -480,7 +554,7 @@ func TestReconcileModsRejectsUnsafeInferredFilenameBeforeWrite(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	err := ReconcileMods(root, []ManifestMod{{URL: "https://example.invalid/mods/%2e%2e%2fevil.jar"}}, false, 2)
+	err := ReconcileMods(root, []ManifestMod{{URL: "https://example.invalid/mods/%2e%2e%2fevil.jar", SHA1: strings.Repeat("1", 40)}}, false, 2)
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "unsafe") {
 		t.Fatalf("ReconcileMods() error = %v, want unsafe filename rejection", err)
 	}
@@ -492,8 +566,19 @@ func TestReconcileModsRejectsUnsafeInferredFilenameBeforeWrite(t *testing.T) {
 func TestInstallOrUpdateNeoForgeUsesDesiredManifest(t *testing.T) {
 	root := t.TempDir()
 	desiredVersion := "21.1.228"
+	installerPayload := []byte("fake installer")
+	installerSHA1 := sha1HexOfBytes(installerPayload)
+	sourceInstaller := filepath.Join(root, "source-installer.jar")
+	if err := os.WriteFile(sourceInstaller, installerPayload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sha1Path := filepath.Join(root, "neoforge.sha1")
+	if err := os.WriteFile(sha1Path, []byte(installerSHA1+"  neoforge-"+desiredVersion+"-installer.jar\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	desired := NeoForgeManifest{
 		InstallerURL: "https://example.invalid/releases/net/neoforged/neoforge/" + desiredVersion + "/neoforge-" + desiredVersion + "-installer.jar",
+		SHA1URL:      fileURL(sha1Path),
 	}
 
 	oldJavaCommand := javaCommand
@@ -503,8 +588,8 @@ func TestInstallOrUpdateNeoForgeUsesDesiredManifest(t *testing.T) {
 		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
 		return cmd
 	}
-	downloadFile = func(rawURL, targetPath string, force bool, label string) error {
-		return os.WriteFile(targetPath, []byte("fake installer"), 0o644)
+	downloadFile = func(rawURL, targetPath string, force bool, label string, checks ...DownloadChecks) error {
+		return downloadToFile(fileURL(sourceInstaller), targetPath, force, label, checks...)
 	}
 	defer func() {
 		javaCommand = oldJavaCommand
@@ -517,6 +602,100 @@ func TestInstallOrUpdateNeoForgeUsesDesiredManifest(t *testing.T) {
 	}
 	if got != desiredVersion {
 		t.Fatalf("InstallOrUpdateNeoForge() = %q, want %q", got, desiredVersion)
+	}
+}
+
+func TestDownloadToFileRejectsSHA1Mismatch(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	source := filepath.Join(root, "source.jar")
+	if err := os.WriteFile(source, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "target.jar")
+	original := []byte("original target content")
+	if err := os.WriteFile(target, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := downloadToFile(fileURL(source), target, true, "artifact", DownloadChecks{SHA1: strings.Repeat("0", 40)})
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "sha1 mismatch") {
+		t.Fatalf("downloadToFile() error = %v, want sha1 mismatch", err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(original) {
+		t.Fatalf("target changed on sha1 mismatch: %q", data)
+	}
+}
+
+func TestReconcileModsKeepsMatchingSHA1(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	source := filepath.Join(root, "source.jar")
+	payload := []byte("payload")
+	if err := os.WriteFile(source, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	modsDirPath := filepath.Join(root, "mods")
+	if err := os.MkdirAll(modsDirPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(modsDirPath, "source.jar")
+	if err := os.WriteFile(target, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ReconcileMods(root, []ManifestMod{{URL: fileURL(source), SHA1: sha1HexOfBytes(payload)}}, false, 2); err != nil {
+		t.Fatalf("ReconcileMods() error = %v", err)
+	}
+
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(payload) {
+		t.Fatalf("target changed unexpectedly: %q", data)
+	}
+}
+
+func TestReconcileModsRedownloadsMismatchedSHA1(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	source := filepath.Join(root, "source.jar")
+	sourcePayload := []byte("new payload")
+	if err := os.WriteFile(source, sourcePayload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	modsDirPath := filepath.Join(root, "mods")
+	if err := os.MkdirAll(modsDirPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(modsDirPath, "source.jar")
+	if err := os.WriteFile(target, []byte("old payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ReconcileMods(root, []ManifestMod{{URL: fileURL(source), SHA1: sha1HexOfBytes(sourcePayload)}}, false, 2); err != nil {
+		t.Fatalf("ReconcileMods() error = %v", err)
+	}
+
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(sourcePayload) {
+		t.Fatalf("target not re-downloaded: %q", data)
 	}
 }
 
@@ -754,16 +933,21 @@ func TestParseOptionsRejectsInvalidDownloadWorkers(t *testing.T) {
 
 func validTestManifest() Manifest {
 	return Manifest{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		Pack:          "varda",
 		Version:       "0.1.4",
 		Minecraft:     "1.21.1",
 		NeoForge: NeoForgeManifest{
 			InstallerURL: "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.228/neoforge-21.1.228-installer.jar",
 		},
+		ServerConfig: &ServerConfigManifest{
+			URL:  "https://example.invalid/server-config.zip",
+			SHA1: strings.Repeat("2", 40),
+		},
 		Mods: []ManifestMod{
 			{
-				URL: "https://example.invalid/example.jar",
+				URL:  "https://example.invalid/example.jar",
+				SHA1: strings.Repeat("1", 40),
 			},
 		},
 	}
@@ -800,6 +984,21 @@ func fileURL(path string) string {
 		return "file://" + slashes
 	}
 	return "file:///" + slashes
+}
+
+func sha1HexOfBytes(data []byte) string {
+	sum := sha1.Sum(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func sha1HexOfFile(t *testing.T, path string) string {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sha1HexOfBytes(data)
 }
 
 func countLaunchNogui(lines []string) int {
